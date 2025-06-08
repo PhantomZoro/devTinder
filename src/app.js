@@ -1,5 +1,7 @@
 const express = require('express');
 const connectDB = require('./config/database');
+const { validateSignUpData } = require("./utils/validation") 
+const bcrypt = require("bcrypt");
 
 const app = express();
 const User = require("./models/user");
@@ -9,15 +11,53 @@ app.use(express.json());
 //Add a user to database
 app.post("/signup", async (req, res) => {
 
-    const user = new User(req.body);
-
     try {
+        //Validation of data 
+        validateSignUpData(req);
+
+        //Encrypt the password 
+        const {firstName, lastName, emailId, password} = req.body;
+        const passwordHash = await bcrypt.hash(password, 10);
+        console.log("Password hash" + passwordHash);
+
+        //Creating a new instance of the User model
+        const user = new User({
+            firstName,
+            lastName,
+            emailId,
+            password: passwordHash,
+        });
+
         await user.save(); //Returns a promise
         res.send("User has been added successfully")
     } catch (err) {
-        res.status(400).send("Error adding user to the database")
+        res.status(400).send("ERROR: "+ err.message)
     }
     
+})
+
+//Login 
+app.post("/login", async (req, res) =>{
+   try {
+        const {emailId, password} = req.body;
+
+        const user = await User.findOne({emailId: emailId});
+        if(!user){
+            throw new Error("Invalid credentials")
+        }
+
+        const isPasswordValid = bcrypt.compare(password, user.password);
+
+        if(isPasswordValid){
+            res.send("User has been logged in successfully")
+        } else {
+            throw new Error("Invalid Credentials");
+        }
+
+        
+    } catch (err) {
+        res.status(400).send("ERROR: "+ err.message)
+    } 
 })
 
 //Get user by email 
@@ -32,7 +72,7 @@ app.get("/user", async (req, res) =>{
         }
         res.send(user)
     } catch (err) {
-        res.status(400).send("Something went wrong")
+        res.status(400).send("Something went wrong" + err.message)
     }
 })
 
@@ -41,7 +81,7 @@ app.get("/feed", async (req, res) =>{
     try {
         const user = await User.find({});
         if(user.length === 0){
-            res.status(400).send("user not found")
+            res.status(400).send("No users found")
         }
         res.send(user)
     } catch (err) {
@@ -62,13 +102,22 @@ app.delete("/user", async (req, res)=>{
 })
 
 //Update data of the user
-app.patch("/user", async (req, res)=>{
+app.patch("/user/:userId", async (req, res)=>{
     const data = req.body;
-    const userId = req.body.userId;
-    console.log(data)
-    try{
+    const userId = req.params?.userId;
+
+   try{
+        const ALLOWED_UPDATES = ["userId", "photoUrl", "about", "gender", "age","skills"]
+
+        const isUpdateAllowed = Object.keys(data).every((k) =>
+            ALLOWED_UPDATES.includes(k)
+        );
+        if(!isUpdateAllowed) {
+            res.status(400).send("Update not allowed");
+        }
+
         await User.findByIdAndUpdate(userId, data, {
-            returnDocument: after,
+            new: true,
             runValidators: true
         });
         res.send("User updated successfully")
